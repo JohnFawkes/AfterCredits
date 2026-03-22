@@ -45,7 +45,7 @@ while url:
         try:
             logger.trace(f"Parsing Media: {media_url}")
             media_response = html.fromstring(requests.get(media_url, headers=headers).content)
-            imdb_url = media_response.xpath("//a[text()='IMDb']/@href")
+            imdb_url = media_response.xpath("//a[contains(@href, 'imdb.com')]/@href")
             if not imdb_url:
                 raise ValueError(f"Skipped {media_url}: IMDb URL not found")
 
@@ -73,7 +73,10 @@ while url:
 headers = ["IMDb ID", "Rating", "Votes", "Tags"]
 widths = []
 for i, header in enumerate(headers):
-    _max = len(str(max(rows, key=lambda t: len(str(t[i])))[i]))
+    if rows:
+        _max = len(str(max(rows, key=lambda t: len(str(t[i])))[i]))
+    else:
+        _max = 0
     widths.append(_max if _max > len(header) else len(header))
 
 
