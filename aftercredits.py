@@ -41,6 +41,10 @@ while page_num < total_pages:
     page_num += 1
     logger.info(f"Parsing Page {page_num}")
     response = requests.get(api_url, headers=headers, params={"categories": 7, "per_page": 100, "_embed": "wp:term", "page": page_num})
+    logger.info(f"API Response: HTTP {response.status_code}")
+    if response.status_code != 200:
+        logger.error(f"API Error: {response.text[:500]}")
+        break
     total_pages = int(response.headers.get("X-WP-TotalPages", 1))
     posts = response.json()
 
