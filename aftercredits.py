@@ -1,4 +1,4 @@
-import os, re, sys
+import os, re, sys, time
 from datetime import datetime, UTC
 
 if sys.version_info[0] != 3 or sys.version_info[1] < 11:
@@ -40,10 +40,15 @@ headers = {
 while page_num < total_pages:
     page_num += 1
     logger.info(f"Parsing Page {page_num}")
-    response = requests.get(api_url, headers=headers, params={"categories": 7, "per_page": 100, "_embed": "wp:term", "page": page_num})
-    logger.info(f"API Response: HTTP {response.status_code}")
-    if response.status_code != 200:
-        logger.error(f"API Error: {response.text[:500]}")
+    for attempt in range(5):
+        response = requests.get(api_url, headers=headers, params={"categories": 7, "per_page": 100, "_embed": "wp:term", "page": page_num})
+        if response.status_code == 200:
+            break
+        wait = int(response.headers.get("Retry-After", 60 * (2 ** attempt)))
+        logger.warning(f"HTTP {response.status_code} on attempt {attempt + 1}/5, retrying in {wait}s")
+        time.sleep(wait)
+    else:
+        logger.error(f"API Error after 5 attempts: HTTP {response.status_code}")
         break
     total_pages = int(response.headers.get("X-WP-TotalPages", 1))
     posts = response.json()
