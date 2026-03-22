@@ -36,10 +36,17 @@ headers = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
-while url:
+response = html.fromstring(requests.get(url, headers=headers).content)
+last_page = response.xpath("//a[@class='last']/@href")
+total_pages = int(re.search(r"/page/(\d+)/", last_page[0]).group(1)) if last_page else 1
+logger.info(f"Total Pages: {total_pages}")
+
+while page_num < total_pages:
     page_num += 1
+    if page_num > 1:
+        url = f"https://aftercredits.com/category/stingers/page/{page_num}/"
+        response = html.fromstring(requests.get(url, headers=headers).content)
     logger.info(f"Parsing Page {page_num}: {url}")
-    response = html.fromstring(requests.get(url, headers=headers).content)
 
     for media_url in response.xpath("//h3[contains(@class, 'entry-title')]/a/@href"):
         try:
@@ -65,9 +72,6 @@ while url:
             data[imdb_id] = YAML.inline({"rating": rating, "votes": votes, "tags": tags})
         except ValueError as e:
             logger.warning(e)
-
-    next_page = response.xpath("//a[@aria-label='next-page']/@href")
-    url = next_page[0] if next_page else None
 
 
 headers = ["IMDb ID", "Rating", "Votes", "Tags"]
