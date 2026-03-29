@@ -1,4 +1,4 @@
-import os, re, sys
+import os, re, sys, time
 from datetime import datetime, UTC
 
 if sys.version_info[0] != 3 or sys.version_info[1] < 11:
@@ -27,8 +27,9 @@ logger.header(args, sub=True)
 logger.separator("Validating Options", space=False, border=False)
 logger.start()
 logger.separator("Scraping AfterCredits", space=False, border=False)
-url = "https://aftercredits.com/category/stingers/"
+api_url = "https://aftercredits.com/wp-json/wp/v2/posts"
 page_num = 0
+total_pages = 1
 rows = []
 data = YAML(path=os.path.join(base_dir, "aftercredits.yml"), start_empty=True)
 headers = {
@@ -36,16 +37,28 @@ headers = {
     "Accept-Language": "en-US,en;q=0.5",
 }
 
-while url:
+while page_num < total_pages:
     page_num += 1
-    logger.info(f"Parsing Page {page_num}: {url}")
-    response = html.fromstring(requests.get(url, headers=headers).content)
+    logger.info(f"Parsing Page {page_num}")
+    for attempt in range(5):
+        response = requests.get(api_url, headers=headers, params={"categories": 7, "per_page": 100, "_embed": "wp:term", "page": page_num})
+        if response.status_code == 200:
+            break
+        wait = int(response.headers.get("Retry-After", 60 * (2 ** attempt)))
+        logger.warning(f"HTTP {response.status_code} on attempt {attempt + 1}/5, retrying in {wait}s")
+        time.sleep(wait)
+    else:
+        logger.error(f"API Error after 5 attempts: HTTP {response.status_code}")
+        break
+    total_pages = int(response.headers.get("X-WP-TotalPages", 1))
+    posts = response.json()
 
-    for media_url in response.xpath("//h3[contains(@class, 'entry-title')]/a/@href"):
+    for post in posts:
+        media_url = post["link"]
         try:
             logger.trace(f"Parsing Media: {media_url}")
-            media_response = html.fromstring(requests.get(media_url, headers=headers).content)
-            imdb_url = media_response.xpath("//a[text()='IMDb']/@href")
+            media_response = html.fromstring(post["content"]["rendered"])
+            imdb_url = media_response.xpath("//a[contains(@href, 'imdb.com')]/@href")
             if not imdb_url:
                 raise ValueError(f"Skipped {media_url}: IMDb URL not found")
 
@@ -54,26 +67,32 @@ while url:
             if imdb_id is None:
                 raise ValueError(f"Skipped {media_url}: IMDb ID not found")
 
-            tags = [str(t) for t in media_response.xpath("//li[@class='entry-category']/a/text()") if str(t) not in ["Now Showing", "Stingers"]]
+            embedded_terms = post.get("_embedded", {}).get("wp:term", [])
+            category_names = [t["name"] for t_list in embedded_terms for t in t_list if t.get("taxonomy") == "category"]
+            tags = [t for t in category_names if t not in ["Now Showing", "Stingers"]]
             if "Games" in tags:
                 raise ValueError(f"Skipped {media_url}: Video Game")
-            rating_data = media_response.xpath("//span[@class='post-ratings']/strong/text()")
-            rating = int(rating_data[0]) if rating_data else 0
-            votes = int(rating_data[1]) if rating_data else 0
+
+            kksr = media_response.xpath("//div[contains(@class, 'kksr-legend')]/text()")
+            rating, votes = 0, 0
+            if kksr:
+                m = re.search(r"(\d+)/\d+ - \((\d+) votes?\)", kksr[0])
+                if m:
+                    rating, votes = int(m.group(1)), int(m.group(2))
 
             rows.append((imdb_id, rating, votes, ', '.join(tags), media_url))
             data[imdb_id] = YAML.inline({"rating": rating, "votes": votes, "tags": tags})
         except ValueError as e:
             logger.warning(e)
 
-    next_page = response.xpath("//a[@aria-label='next-page']/@href")
-    url = next_page[0] if next_page else None
-
 
 headers = ["IMDb ID", "Rating", "Votes", "Tags"]
 widths = []
 for i, header in enumerate(headers):
-    _max = len(str(max(rows, key=lambda t: len(str(t[i])))[i]))
+    if rows:
+        _max = len(str(max(rows, key=lambda t: len(str(t[i])))[i]))
+    else:
+        _max = 0
     widths.append(_max if _max > len(header) else len(header))
 
 
